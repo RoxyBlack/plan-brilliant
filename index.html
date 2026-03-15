@@ -5485,28 +5485,26 @@
                 let data = await fetchJobsDirect(searchQuery, whereStr, salaryStr);
                 console.log('✅ Results:', data.results?.length || 0);
 
-                // If combined/skills query returned nothing, retry with full hat name
+                // If combined/skills query returned nothing, retry with exact hat name only
                 const queryWords = searchQuery.trim().split(/\s+/);
-                const hatName = queryWords[0]; // first word = the career path title
                 if ((!data.results || data.results.length === 0) && queryWords.length > 1) {
-                    console.warn('⚠️ Combined query returned 0 — retrying with hat name:', hatName);
-                    data = await fetchJobsDirect(hatName, whereStr, salaryStr);
-                    console.log('✅ Hat-name results:', data.results?.length || 0);
+                    // Extract the original hat name — everything before the appended skill
+                    // Hat names are stored in appData.topThreeHats, use full searchQuery minus skill
+                    const hatOnly = queryWords.slice(0, -1).join(' '); // drop last word (the skill)
+                    console.warn('⚠️ Combined query returned 0 — retrying with hat only:', hatOnly);
+                    data = await fetchJobsDirect(hatOnly, whereStr, salaryStr);
+                    console.log('✅ Hat-only results:', data.results?.length || 0);
                 }
 
-                // Canada-wide returned nothing — retry with city
+                // Canada-wide returned nothing — retry with city, keep salary filter
                 if (remoteOk && (!data.results || data.results.length === 0)) {
+                    const hatOnly = queryWords.slice(0, -1).join(' ') || searchQuery;
                     console.warn('⚠️ No Canada-wide results — retrying with city');
-                    data = await fetchJobsDirect(hatName, city, salaryStr);
+                    data = await fetchJobsDirect(hatOnly, city, salaryStr);
                     console.log('✅ City retry results:', data.results?.length || 0);
                 }
-
-                // Last resort — drop salary filter if still nothing
-                if ((!data.results || data.results.length === 0) && salaryStr) {
-                    console.warn('⚠️ Still no results — retrying without salary filter');
-                    data = await fetchJobsDirect(hatName, city, '');
-                    console.log('✅ No-salary retry results:', data.results?.length || 0);
-                }
+                // Note: We intentionally do NOT drop the salary filter as a fallback
+                // — that causes completely unrelated high-salary roles to appear
 
                 if (!data.results || data.results.length === 0) {
                     return [];
