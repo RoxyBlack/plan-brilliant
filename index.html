@@ -5485,26 +5485,26 @@
                 let data = await fetchJobsDirect(searchQuery, whereStr, salaryStr);
                 console.log('✅ Results:', data.results?.length || 0);
 
-                // If combined/skills query returned nothing, retry with path title only
+                // If combined/skills query returned nothing, retry with full hat name
                 const queryWords = searchQuery.trim().split(/\s+/);
+                const hatName = queryWords[0]; // first word = the career path title
                 if ((!data.results || data.results.length === 0) && queryWords.length > 1) {
-                    const pathOnly = queryWords[0];
-                    console.warn('⚠️ Combined query returned 0 — retrying with path only:', pathOnly);
-                    data = await fetchJobsDirect(pathOnly, whereStr, salaryStr);
-                    console.log('✅ Path-only results:', data.results?.length || 0);
+                    console.warn('⚠️ Combined query returned 0 — retrying with hat name:', hatName);
+                    data = await fetchJobsDirect(hatName, whereStr, salaryStr);
+                    console.log('✅ Hat-name results:', data.results?.length || 0);
                 }
 
                 // Canada-wide returned nothing — retry with city
                 if (remoteOk && (!data.results || data.results.length === 0)) {
                     console.warn('⚠️ No Canada-wide results — retrying with city');
-                    data = await fetchJobsDirect(queryWords[0] || searchQuery, city, salaryStr);
+                    data = await fetchJobsDirect(hatName, city, salaryStr);
                     console.log('✅ City retry results:', data.results?.length || 0);
                 }
 
                 // Last resort — drop salary filter if still nothing
                 if ((!data.results || data.results.length === 0) && salaryStr) {
                     console.warn('⚠️ Still no results — retrying without salary filter');
-                    data = await fetchJobsDirect(queryWords[0] || searchQuery, city, '');
+                    data = await fetchJobsDirect(hatName, city, '');
                     console.log('✅ No-salary retry results:', data.results?.length || 0);
                 }
 
@@ -5613,18 +5613,19 @@
                 // Update the UI
                 if (container && jobs.length > 0) {
                     container.innerHTML = jobs.map(job => `
-                        <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 15px; margin-bottom: 12px;">
-                            <h4 style="color: #ffd700; margin: 0 0 8px 0; font-size: 1.1em;">${job.title}</h4>
-                            <p style="color: rgba(255,255,255,0.9); margin: 0 0 5px 0; font-size: 0.95em;">${job.company}</p>
-                            <p style="color: rgba(255,255,255,0.7); margin: 0 0 5px 0; font-size: 0.9em;">📍 ${job.location}</p>
-                            ${job.salary ? `<p style="color: rgba(255,215,0,0.8); margin: 0 0 10px 0; font-size: 0.9em;">💰 ${job.salary}</p>` : ''}
-                            <a href="${job.url}" target="_blank" style="display: inline-block; padding: 8px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; border-radius: 6px; font-size: 0.9em; font-weight: 600; margin-top: 8px;">
-                                View Posting →
-                            </a>
+                        <div class="job-card">
+                            <h4>${job.title}</h4>
+                            <div class="company">${job.company}</div>
+                            <div class="location">📍 ${job.location}</div>
+                            ${job.salary ? `<div class="location" style="color: #667eea; font-weight: 600;">💰 ${job.salary}</div>` : ''}
+                            <a href="${job.url}" target="_blank" class="apply-btn">View Posting →</a>
                         </div>
                     `).join('');
                 } else {
-                    container.innerHTML = '<p style="color: rgba(255,255,255,0.6); padding: 20px; text-align: center;">No jobs found. Try adjusting your search criteria.</p>';
+                    container.innerHTML = `
+                        <div style="padding: 30px; text-align: center; background: #f8f9fa; border-radius: 8px; border: 1px dashed #ddd;">
+                            <p style="color: #666; margin: 0;">No results found. Try refreshing or check back later.</p>
+                        </div>`;
                 }
                 
             } catch (error) {
