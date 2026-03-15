@@ -5548,7 +5548,10 @@
 
             var chips = '';
             ranked.forEach(function(suggestion) {
-                chips += '<button onclick="refineJobSearch(' + pathIndex + ', &quot;' + suggestion + '&quot;)" '
+                chips += '<button '
+                    + 'data-suggestion="' + suggestion.replace(/"/g, '&quot;') + '" '
+                    + 'data-path="' + pathIndex + '" '
+                    + 'onclick="refineJobSearch(parseInt(this.dataset.path), this.dataset.suggestion)" '
                     + 'style="background: white; border: 2px solid #667eea; color: #667eea; padding: 5px 12px; border-radius: 20px; font-size: 0.82em; font-weight: 600; cursor: pointer; transition: all 0.15s;" '
                     + 'onmouseover="this.style.background=&apos;#667eea&apos;; this.style.color=&apos;white&apos;" '
                     + 'onmouseout="this.style.background=&apos;white&apos;; this.style.color=&apos;#667eea&apos;">'
@@ -5572,6 +5575,15 @@
             const workTitles = getWorkTitles();
             const poolKey = hat + '-' + pathIndex;
             const container = document.getElementById('path' + pathIndex + 'Jobs');
+
+            console.log('🔍 Refining search for path', pathIndex, 'to:', refinedTitle);
+
+            // Clear pool and job cache so we get fresh results for this refined title
+            delete jobPools[poolKey];
+            const locationParts = location.split(',');
+            const city = locationParts[0]?.trim() || 'Calgary';
+            const cacheKey = refinedTitle + '-' + city + '-' + remoteOk + '-' + minSalary;
+            delete jobCache[cacheKey];
 
             if (container) container.innerHTML = '<p style="color: #667eea; padding: 20px; text-align: center;">🔍 Searching for <strong>' + refinedTitle + '</strong>...</p>';
 
