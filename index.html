@@ -5123,6 +5123,7 @@
         window.downloadResumePDF = downloadResumePDF;
         window.downloadResumeWord = downloadResumeWord;
         window.returnToPlanBrilliant = returnToPlanBrilliant;
+        window.refineJobSearch = refineJobSearch;
         window.editSection = editSection;
         window.returnToPreview = returnToPreview;
         window.updateSalaryDisplay = updateSalaryDisplay;
@@ -5359,12 +5360,13 @@
                     const poolKey = hat + '-' + index;
                     jobPools[poolKey] = { scored: scored, page: 0 };
 
-                    // Show top 6
+                    // Show top 6 with optional refinement banner
                     const top6 = scored.slice(0, 6);
                     const label = top6.length > 0
                         ? '<p style="color: #667eea; font-size: 0.82em; margin: 0 0 12px 0; font-weight: 600;">✨ Top matches for your profile — ranked by skill alignment</p>'
                         : '';
-                    jobContainer.innerHTML = label + renderJobCards(top6, true);
+                    const banner = buildRefinementBanner(hat, index, skillsStr);
+                    jobContainer.innerHTML = label + banner + renderJobCards(top6, true);
 
                 }).catch(function(error) {
                     console.error('Error loading jobs for path ' + index + ':', error);
@@ -5506,6 +5508,90 @@
 
         // ── Build smart search query based on strategy ────────────────────────
         // Soft skills that hurt search precision when combined with a job title
+        // ── Generic job title detection + refinement suggestions ───────────────
+        const GENERIC_TITLE_MAP = {
+            'manager': ['Finance Manager', 'Operations Manager', 'Project Manager', 'Account Manager', 'HR Manager'],
+            'director': ['Finance Director', 'Operations Director', 'Marketing Director', 'IT Director', 'Program Director'],
+            'coordinator': ['Project Coordinator', 'HR Coordinator', 'Marketing Coordinator', 'Operations Coordinator'],
+            'analyst': ['Financial Analyst', 'Business Analyst', 'Data Analyst', 'Operations Analyst', 'Systems Analyst'],
+            'specialist': ['HR Specialist', 'Finance Specialist', 'IT Specialist', 'Marketing Specialist'],
+            'consultant': ['Management Consultant', 'Finance Consultant', 'IT Consultant', 'HR Consultant'],
+            'administrator': ['Office Administrator', 'HR Administrator', 'Systems Administrator', 'Finance Administrator'],
+            'supervisor': ['Accounts Payable Supervisor', 'Operations Supervisor', 'Finance Supervisor', 'Payroll Supervisor'],
+            'lead': ['Finance Lead', 'Operations Lead', 'Project Lead', 'Team Lead', 'IT Lead'],
+            'assistant': ['Executive Assistant', 'Administrative Assistant', 'Finance Assistant', 'Project Assistant'],
+            'officer': ['Finance Officer', 'Chief Financial Officer', 'Compliance Officer', 'Operations Officer'],
+            'executive': ['Account Executive', 'Sales Executive', 'Finance Executive', 'Senior Executive'],
+        };
+
+        function getGenericTitleSuggestions(hat) {
+            const lower = hat.toLowerCase().trim();
+            for (const [key, suggestions] of Object.entries(GENERIC_TITLE_MAP)) {
+                if (lower === key || lower.endsWith(' ' + key)) {
+                    return suggestions;
+                }
+            }
+            return null;
+        }
+
+        function buildRefinementBanner(hat, pathIndex, skillsStr) {
+            const suggestions = getGenericTitleSuggestions(hat);
+            if (!suggestions) return '';
+
+            // Pick top 4 suggestions — prioritize ones that match user skills
+            const skills = skillsStr.toLowerCase();
+            const ranked = suggestions.sort(function(a, b) {
+                const aMatch = skills.includes(a.split(' ')[0].toLowerCase()) ? 1 : 0;
+                const bMatch = skills.includes(b.split(' ')[0].toLowerCase()) ? 1 : 0;
+                return bMatch - aMatch;
+            }).slice(0, 4);
+
+            var chips = '';
+            ranked.forEach(function(suggestion) {
+                chips += '<button onclick="refineJobSearch(' + pathIndex + ', &quot;' + suggestion + '&quot;)" '
+                    + 'style="background: white; border: 2px solid #667eea; color: #667eea; padding: 5px 12px; border-radius: 20px; font-size: 0.82em; font-weight: 600; cursor: pointer; transition: all 0.15s;" '
+                    + 'onmouseover="this.style.background=&apos;#667eea&apos;; this.style.color=&apos;white&apos;" '
+                    + 'onmouseout="this.style.background=&apos;white&apos;; this.style.color=&apos;#667eea&apos;">'
+                    + suggestion + '</button>';
+            });
+
+            return '<div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 12px 16px; margin-bottom: 14px;">'
+                 + '<p style="color: #92400e; font-size: 0.85em; margin: 0 0 8px 0;">'
+                 + '💡 <strong>"' + hat + '"</strong> is a broad title — results may span many industries. '
+                 + 'Try a more specific role:</p>'
+                 + '<div style="display: flex; flex-wrap: wrap; gap: 6px;">' + chips + '</div>'
+                 + '</div>';
+        }
+
+        function refineJobSearch(pathIndex, refinedTitle) {
+            const hat = appData.topThreeHats[pathIndex];
+            const location = appData.location || 'Calgary, AB';
+            const remoteOk = appData.remoteOk || false;
+            const minSalary = appData.minSalary || 60000;
+            const skillsStr = appData.skills[hat] || '';
+            const workTitles = getWorkTitles();
+            const poolKey = hat + '-' + pathIndex;
+            const container = document.getElementById('path' + pathIndex + 'Jobs');
+
+            if (container) container.innerHTML = '<p style="color: #667eea; padding: 20px; text-align: center;">🔍 Searching for <strong>' + refinedTitle + '</strong>...</p>';
+
+            fetchRealJobs(refinedTitle, location, remoteOk, minSalary).then(function(jobs) {
+                var scored = jobs
+                    .map(function(job) { return scoreJobAgainstProfile(job, refinedTitle, skillsStr, workTitles); })
+                    .sort(function(a, b) { return b.score - a.score; });
+
+                jobPools[poolKey] = { scored: scored, page: 0 };
+
+                var top6 = scored.slice(0, 6);
+                var label = '<p style="color: #667eea; font-size: 0.82em; margin: 0 0 12px 0; font-weight: 600;">✨ Top matches for <strong>' + refinedTitle + '</strong> — ranked by skill alignment</p>';
+                // Show refinement banner again so they can try another
+                var banner = buildRefinementBanner(hat, pathIndex, skillsStr);
+                if (container) container.innerHTML = label + banner + renderJobCards(top6, true);
+            }).catch(function() {
+                if (container) container.innerHTML = '<p style="color: #e53e3e; padding: 20px; text-align: center;">⚠️ Error loading jobs. Please try again.</p>';
+            });
+        }
+
         const SOFT_SKILL_KEYWORDS = [
             'adaptability','communication','leadership','teamwork','problem-solving',
             'critical thinking','decision-making','time management','multitasking',
@@ -5714,7 +5800,8 @@
                 const label = top6.length > 0
                     ? '<p style="color: #667eea; font-size: 0.82em; margin: 0 0 12px 0; font-weight: 600;">✨ Top matches for your profile — ranked by skill alignment</p>'
                     : '';
-                if (container) container.innerHTML = label + renderJobCards(top6, true);
+                const banner = buildRefinementBanner(hat, pathIndex, skillsStr);
+                if (container) container.innerHTML = label + banner + renderJobCards(top6, true);
                 
             } catch (error) {
                 console.error('Error refreshing jobs:', error);
