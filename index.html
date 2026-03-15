@@ -5485,11 +5485,27 @@
                 let data = await fetchJobsDirect(searchQuery, whereStr, salaryStr);
                 console.log('✅ Results:', data.results?.length || 0);
 
+                // If combined/skills query returned nothing, retry with path title only
+                const queryWords = searchQuery.trim().split(/\s+/);
+                if ((!data.results || data.results.length === 0) && queryWords.length > 1) {
+                    const pathOnly = queryWords[0];
+                    console.warn('⚠️ Combined query returned 0 — retrying with path only:', pathOnly);
+                    data = await fetchJobsDirect(pathOnly, whereStr, salaryStr);
+                    console.log('✅ Path-only results:', data.results?.length || 0);
+                }
+
                 // Canada-wide returned nothing — retry with city
                 if (remoteOk && (!data.results || data.results.length === 0)) {
                     console.warn('⚠️ No Canada-wide results — retrying with city');
-                    data = await fetchJobsDirect(searchQuery, city, salaryStr);
+                    data = await fetchJobsDirect(queryWords[0] || searchQuery, city, salaryStr);
                     console.log('✅ City retry results:', data.results?.length || 0);
+                }
+
+                // Last resort — drop salary filter if still nothing
+                if ((!data.results || data.results.length === 0) && salaryStr) {
+                    console.warn('⚠️ Still no results — retrying without salary filter');
+                    data = await fetchJobsDirect(queryWords[0] || searchQuery, city, '');
+                    console.log('✅ No-salary retry results:', data.results?.length || 0);
                 }
 
                 if (!data.results || data.results.length === 0) {
