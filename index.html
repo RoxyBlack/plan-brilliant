@@ -5318,7 +5318,7 @@
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                             <h3>PATH ${index + 1}: ${hat} ${emoji}</h3>
                             <button onclick="refreshJobsForPath(${index})" style="background: #667eea; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9em;">
-                                🔄 Refresh Jobs
+                                🔄 Next Matches
                             </button>
                         </div>
                         <p style="color: #666; margin-bottom: 15px;"><strong>Skills:</strong> ${skills}</p>
@@ -5341,46 +5341,119 @@
                 `;
             }).join('');
             
-            // Load real jobs for each path asynchronously
+            // Load real jobs for each path asynchronously — broad search, scored ranking
             appData.topThreeHats.forEach((hat, index) => {
                 const skillsStr = appData.skills[hat] || '';
-                const searchQuery = buildSearchQuery(hat, skillsStr, searchStrategy);
-                fetchRealJobs(searchQuery, location, remoteOk, minSalary).then(jobs => {
-                    console.log(`📊 Jobs loaded for path ${index} (${hat}):`, jobs);
-                    const jobContainer = document.getElementById(`path${index}Jobs`);
-                    if (jobContainer) {
-                        if (jobs && jobs.length > 0) {
-                            jobContainer.innerHTML = jobs.map(job => `
-                                <div class="job-card">
-                                    <h4>${job.title}</h4>
-                                    <div class="company">${job.company}</div>
-                                    <div class="location">📍 ${job.location}</div>
-                                    ${job.salary ? `<div class="location" style="color: #667eea; font-weight: 600;">💰 ${job.salary}</div>` : ''}
-                                    <a href="${job.url}" target="_blank" class="apply-btn">View Posting →</a>
-                                </div>
-                            `).join('');
-                        } else {
-                            jobContainer.innerHTML = `
-                                <div style="padding: 30px; text-align: center; background: rgba(255,255,255,0.05); border-radius: 8px; border: 1px dashed rgba(255,255,255,0.2);">
-                                    <p style="color: #888; font-size: 1.1em; margin: 0 0 10px 0;">🔍 No results found</p>
-                                    <p style="color: #666; font-size: 0.9em; margin: 0;">Try refreshing or check back later for new postings.</p>
-                                </div>
-                            `;
-                        }
-                    } else {
-                        console.error(`Container path${index}Jobs not found`);
-                    }
-                }).catch(error => {
-                    console.error(`❌ Error loading jobs for path ${index}:`, error);
-                    const jobContainer = document.getElementById(`path${index}Jobs`);
-                    if (jobContainer) {
-                        jobContainer.innerHTML = '<p style="color: rgba(255,100,100,0.8); padding: 20px; text-align: center;">⚠️ Error loading jobs. Please try refreshing.</p>';
-                    }
+                const workTitles = getWorkTitles();
+                // Broad search — just the hat name, no skill appended
+                fetchRealJobs(hat, location, remoteOk, minSalary).then(jobs => {
+                    const jobContainer = document.getElementById('path' + index + 'Jobs');
+                    if (!jobContainer) return;
+
+                    // Score all jobs against user profile
+                    const scored = jobs
+                        .map(function(job) { return scoreJobAgainstProfile(job, hat, skillsStr, workTitles); })
+                        .sort(function(a, b) { return b.score - a.score; });
+
+                    // Store full pool for pagination
+                    const poolKey = hat + '-' + index;
+                    jobPools[poolKey] = { scored: scored, page: 0 };
+
+                    // Show top 6
+                    const top6 = scored.slice(0, 6);
+                    const label = top6.length > 0
+                        ? '<p style="color: #667eea; font-size: 0.82em; margin: 0 0 12px 0; font-weight: 600;">✨ Top matches for your profile — ranked by skill alignment</p>'
+                        : '';
+                    jobContainer.innerHTML = label + renderJobCards(top6, true);
+
+                }).catch(function(error) {
+                    console.error('Error loading jobs for path ' + index + ':', error);
+                    const jobContainer = document.getElementById('path' + index + 'Jobs');
+                    if (jobContainer) jobContainer.innerHTML = '<p style="color: #e53e3e; padding: 20px; text-align: center;">⚠️ Error loading jobs. Please try refreshing.</p>';
                 });
             });
         }
 
-        // ── Job API configuration ────────────────────────────────────────────────
+        // ── Job scoring & pagination engine ─────────────────────────────────────
+        // Stores full scored pools per path for pagination
+        const jobPools = {};  // { "hat-city-salary": { scored: [...], page: 0 } }
+
+        function scoreJobAgainstProfile(job, hat, skillsString, workTitles) {
+            const jobText = ((job.title || '') + ' ' + (job.description || '')).toLowerCase();
+            let score = 0;
+            const matchedKeywords = [];
+
+            // Score against career path / hat name (weighted 3x)
+            const hatWords = hat.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+            hatWords.forEach(word => {
+                if (jobText.includes(word)) {
+                    score += 3;
+                    matchedKeywords.push(word);
+                }
+            });
+
+            // Score against skills (weighted 2x each)
+            const skills = (skillsString || '').split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+            skills.forEach(skill => {
+                const skillWords = skill.split(/\s+/);
+                const matched = skillWords.every(w => jobText.includes(w));
+                if (matched) {
+                    score += 2;
+                    matchedKeywords.push(skill);
+                }
+            });
+
+            // Score against past job titles from work history (weighted 2x)
+            (workTitles || []).forEach(title => {
+                const titleWords = title.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+                titleWords.forEach(word => {
+                    if (jobText.includes(word)) {
+                        score += 2;
+                        if (!matchedKeywords.includes(word)) matchedKeywords.push(word);
+                    }
+                });
+            });
+
+            return { ...job, score, matchedKeywords: [...new Set(matchedKeywords)] };
+        }
+
+        function getWorkTitles() {
+            // Extract job titles from work history for scoring
+            if (!window.workRoles || !workRoles.length) return [];
+            return workRoles.map(r => r.data?.title || '').filter(t => t);
+        }
+
+        function renderJobCards(jobs, showMatchBadge) {
+            if (!jobs || jobs.length === 0) {
+                return '<div style="padding: 30px; text-align: center; background: #f8f9fa; border-radius: 8px; border: 1px dashed #ddd;">'
+                     + '<p style="color: #888; font-size: 1em; margin: 0 0 8px 0;">🔍 No matching roles found right now</p>'
+                     + '<p style="color: #aaa; font-size: 0.85em; margin: 0;">Try lowering your salary threshold or refreshing later.</p>'
+                     + '</div>';
+            }
+            return jobs.map(function(job) {
+                var badge = '';
+                if (showMatchBadge && job.matchedKeywords && job.matchedKeywords.length > 0) {
+                    badge = '<div style="margin: 6px 0 8px 0; display: flex; flex-wrap: wrap; gap: 4px;">';
+                    job.matchedKeywords.slice(0, 4).forEach(function(kw) {
+                        badge += '<span style="background: #eef2ff; color: #667eea; font-size: 0.72em; padding: 2px 8px; border-radius: 20px; font-weight: 600;">' + kw + '</span>';
+                    });
+                    badge += '</div>';
+                }
+                var salaryHtml = job.salary
+                    ? '<div class="location" style="color: #667eea; font-weight: 600;">💰 ' + job.salary + '</div>'
+                    : '';
+                return '<div class="job-card">'
+                     + '<h4>' + job.title + '</h4>'
+                     + '<div class="company">' + job.company + '</div>'
+                     + '<div class="location">📍 ' + job.location + '</div>'
+                     + salaryHtml
+                     + badge
+                     + '<a href="' + job.url + '" target="_blank" class="apply-btn">View Posting →</a>'
+                     + '</div>';
+            }).join('');
+        }
+
+                // ── Job API configuration ────────────────────────────────────────────────
         // Calls our Netlify serverless function — no CORS issues, no proxy needed
         const JOBS_API = '/.netlify/functions/jobs';
 
@@ -5590,41 +5663,58 @@
             const location = appData.location || 'Calgary, AB';
             const remoteOk = appData.remoteOk || false;
             const minSalary = appData.minSalary || 60000;
-            const searchStrategy = appData.searchStrategy || 'combined';
             const skillsStr = appData.skills[hat] || '';
-            const searchQuery = buildSearchQuery(hat, skillsStr, searchStrategy);
-            
-            // Show loading state
-            const container = document.getElementById(`path${pathIndex}Jobs`);
-            if (container) {
-                container.innerHTML = '<p style="color: #667eea; padding: 20px; text-align: center;">🔄 Loading fresh jobs...</p>';
-            }
-            
-            try {
-                // Clear cache for this specific search
-                const cacheKey = `${searchQuery}-${location}-${remoteOk}-${minSalary}`;
-                delete jobCache[cacheKey];
-                
-                // Fetch new jobs
-                const jobs = await fetchRealJobs(searchQuery, location, remoteOk, minSalary);
-                
-                // Update the UI
-                if (container && jobs.length > 0) {
-                    container.innerHTML = jobs.map(job => `
-                        <div class="job-card">
-                            <h4>${job.title}</h4>
-                            <div class="company">${job.company}</div>
-                            <div class="location">📍 ${job.location}</div>
-                            ${job.salary ? `<div class="location" style="color: #667eea; font-weight: 600;">💰 ${job.salary}</div>` : ''}
-                            <a href="${job.url}" target="_blank" class="apply-btn">View Posting →</a>
-                        </div>
-                    `).join('');
+            const workTitles = getWorkTitles();
+            const poolKey = hat + '-' + pathIndex;
+            const container = document.getElementById('path' + pathIndex + 'Jobs');
+
+            // If we have a pool cached, paginate through it
+            if (jobPools[poolKey] && jobPools[poolKey].scored.length > 0) {
+                const pool = jobPools[poolKey];
+                pool.page = (pool.page || 0) + 1;
+                const start = pool.page * 6;
+                const next6 = pool.scored.slice(start, start + 6);
+
+                if (next6.length > 0) {
+                    const label = '<p style="color: #667eea; font-size: 0.82em; margin: 0 0 12px 0; font-weight: 600;">🔄 Next best matches for your profile</p>';
+                    container.innerHTML = label + renderJobCards(next6, true);
+                    return;
                 } else {
-                    container.innerHTML = `
-                        <div style="padding: 30px; text-align: center; background: #f8f9fa; border-radius: 8px; border: 1px dashed #ddd;">
-                            <p style="color: #666; margin: 0;">No results found. Try refreshing or check back later.</p>
-                        </div>`;
+                    // Wrap back to start
+                    pool.page = 0;
+                    const top6 = pool.scored.slice(0, 6);
+                    const label = '<p style="color: #667eea; font-size: 0.82em; margin: 0 0 12px 0; font-weight: 600;">✨ Back to top matches — refreshing from Adzuna for latest postings</p>';
+                    container.innerHTML = label + renderJobCards(top6, true);
+                    // Also re-fetch in background to get fresh data
+                    const locationParts = location.split(',');
+                    const city = locationParts[0]?.trim() || 'Calgary';
+                    const cacheKey = hat + '-' + city + '-' + remoteOk + '-' + minSalary;
+                    delete jobCache[cacheKey];
+                    return;
                 }
+            }
+
+            // No pool yet — fetch fresh
+            if (container) container.innerHTML = '<p style="color: #667eea; padding: 20px; text-align: center;">🔄 Finding your best matches...</p>';
+
+            try {
+                const locationParts = location.split(',');
+                const city = locationParts[0]?.trim() || 'Calgary';
+                const cacheKey = hat + '-' + city + '-' + remoteOk + '-' + minSalary;
+                delete jobCache[cacheKey];
+                const jobs = await fetchRealJobs(hat, location, remoteOk, minSalary);
+                
+                // Score and store pool
+                const scored = jobs
+                    .map(function(job) { return scoreJobAgainstProfile(job, hat, skillsStr, workTitles); })
+                    .sort(function(a, b) { return b.score - a.score; });
+                jobPools[poolKey] = { scored: scored, page: 0 };
+
+                const top6 = scored.slice(0, 6);
+                const label = top6.length > 0
+                    ? '<p style="color: #667eea; font-size: 0.82em; margin: 0 0 12px 0; font-weight: 600;">✨ Top matches for your profile — ranked by skill alignment</p>'
+                    : '';
+                if (container) container.innerHTML = label + renderJobCards(top6, true);
                 
             } catch (error) {
                 console.error('Error refreshing jobs:', error);
